@@ -15,6 +15,7 @@ from torch.utils.data import ConcatDataset
 from ultralytics.utils import LOCAL_RANK, NUM_THREADS, TQDM, colorstr
 from ultralytics.utils.ops import resample_segments
 from ultralytics.utils.torch_utils import TORCHVISION_0_18
+from ultralytics.utils.ops import segments2boxes
 
 from .augment import (
     Compose,
@@ -112,7 +113,7 @@ class YOLODataset(BaseDataset):
                                 "im_file": im_file,
                                 "shape": shape,
                                 "cls": lb[:, 0:1],  # n, 1
-                                "bboxes": lb[:, 1:],  # n, 4
+                                "bboxes":segments2boxes([segment[4:] for segment in segments]) ,  # n, 4
                                 "obb_dota":[segment[:4] for segment in segments], # 旋转的4个x和y 遵照dota格式
                                 "segments": [segment[4:] for segment in segments], # 其他的点组成的mask
                                 "keypoints": keypoint,
