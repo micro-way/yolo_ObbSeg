@@ -32,6 +32,7 @@ ultralytics.egg-info
 
 #.idea
 .idea
+runs
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
