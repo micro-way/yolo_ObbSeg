@@ -413,6 +413,18 @@ class SegmentationModel(DetectionModel):
         return v8SegmentationLoss(self)
 
 
+class ObbSegModel(DetectionModel):
+    """YOLOv8 segmentation model."""
+
+    def __init__(self, cfg="yolov8n-obb_seg.yaml", ch=3, nc=None, verbose=True):
+        """Initialize YOLOv8 segmentation model with given config and parameters."""
+        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
+
+    def init_criterion(self):
+        """Initialize the loss criterion for the SegmentationModel."""
+        return v8SegmentationLoss(self)
+
+
 class PoseModel(DetectionModel):
     """YOLOv8 pose model."""
 
@@ -1136,6 +1148,8 @@ def guess_model_task(model):
             return "pose"
         if m == "obb":
             return "obb"
+        if m == "obb_seg":
+            return "obb_seg"
 
     # Guess from model cfg
     if isinstance(model, dict):

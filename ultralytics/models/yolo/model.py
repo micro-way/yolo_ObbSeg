@@ -5,6 +5,7 @@ from pathlib import Path
 from ultralytics.engine.model import Model
 from ultralytics.models import yolo
 from ultralytics.nn.tasks import ClassificationModel, DetectionModel, OBBModel, PoseModel, SegmentationModel, WorldModel
+from ultralytics.nn.tasks import ObbSegModel
 from ultralytics.utils import ROOT, yaml_load
 
 
@@ -56,14 +57,23 @@ class YOLO(Model):
                 "validator": yolo.obb.OBBValidator,
                 "predictor": yolo.obb.OBBPredictor,
             },
+            # # zcw modified begin
+            # "obb_seg": {
+            #     "model": ObbSegModel,
+            #     "trainer": yolo.obb_seg.ObbSegTrainer,
+            #     "validator": yolo.obb_seg.ObbSegValidator,
+            #     "predictor": yolo.obb_seg.ObbSegPredictor,
+            # },
+            # # zcw modified end
             # zcw modified begin
             "obb_seg": {
-                "model": SegmentationModel,
-                "trainer": yolo.segment.SegmentationTrainer,
-                "validator": yolo.segment.SegmentationValidator,
-                "predictor": yolo.segment.SegmentationPredictor,
+                "model": ObbSegModel,
+                "trainer": yolo.obb_seg.ObbSegTrainer,
+                "validator": yolo.obb_seg.ObbSegValidator,
+                "predictor": yolo.obb_seg.ObbSegPredictor,
             },
             # zcw modified end
+
         }
 
 

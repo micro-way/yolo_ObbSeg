@@ -5,6 +5,7 @@ from .tasks import (
     ClassificationModel,
     DetectionModel,
     SegmentationModel,
+    ObbSegModel,
     attempt_load_one_weight,
     attempt_load_weights,
     guess_model_scale,
@@ -26,4 +27,5 @@ __all__ = (
     "SegmentationModel",
     "ClassificationModel",
     "BaseModel",
+    "ObbSegModel",
 )
