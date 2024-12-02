@@ -57,14 +57,6 @@ class YOLO(Model):
                 "validator": yolo.obb.OBBValidator,
                 "predictor": yolo.obb.OBBPredictor,
             },
-            # # zcw modified begin
-            # "obb_seg": {
-            #     "model": ObbSegModel,
-            #     "trainer": yolo.obb_seg.ObbSegTrainer,
-            #     "validator": yolo.obb_seg.ObbSegValidator,
-            #     "predictor": yolo.obb_seg.ObbSegPredictor,
-            # },
-            # # zcw modified end
             # zcw modified begin
             "obb_seg": {
                 "model": ObbSegModel,
