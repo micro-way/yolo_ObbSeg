@@ -72,8 +72,35 @@ class ObbSegValidator(DetectionValidator):
     def postprocess(self, preds):
         """Post-processes YOLO predictions and returns output detections with proto."""
         # todo : maybe need to modify function ops.non_max_suppression for obb_seg
+        # p = ops.non_max_suppression(
+        #     preds[0][:, :-1],# [(2+4)+32+1, 300]=>[(2+4)+32,300] #dim=1 is 6+32+1=39
+        #     self.args.conf,
+        #     self.args.iou,
+        #     labels=self.lb,
+        #     multi_label=True,
+        #     agnostic=self.args.single_cls or self.args.agnostic_nms,
+        #     max_det=self.args.max_det,
+        #     nc=self.nc,
+        #     # rotated=True,
+        # )
+
+        # 这里强行使用旋转且没有给监督正则，应当无法起到效果
+        # 这个代码也不对，看看obb是什么格式的数据
+        # 这个格式可能是对的，但是也看看 return ，如何和seg兼容
         p = ops.non_max_suppression(
-            preds[0][:, :-1],# [300,6+32+1]=>[300,6+32] #dim=1 is 6+32+1=39
+            torch.cat([preds[0][:, :6,:], (preds[0][:, -1,:]).unsqueeze(1)], dim=1),# [(2+4)+32+1, 300]=>[(2+4)+1,300] #dim=1 is 6+32+1=39
+            self.args.conf,
+            self.args.iou,
+            labels=self.lb,
+            multi_label=True,
+            agnostic=self.args.single_cls or self.args.agnostic_nms,
+            max_det=self.args.max_det,
+            nc=self.nc,
+            rotated=True,
+        )
+
+        p = ops.non_max_suppression(
+            preds[0][:, :-1],# [(2+4)+32+1, 300]=>[(2+4)+32,300] #dim=1 is 6+32+1=39
             self.args.conf,
             self.args.iou,
             labels=self.lb,
