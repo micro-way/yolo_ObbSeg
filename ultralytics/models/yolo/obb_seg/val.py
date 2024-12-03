@@ -71,8 +71,9 @@ class ObbSegValidator(DetectionValidator):
 
     def postprocess(self, preds):
         """Post-processes YOLO predictions and returns output detections with proto."""
+        # todo : maybe need to modify function ops.non_max_suppression for obb_seg
         p = ops.non_max_suppression(
-            preds[0],
+            preds[0][:, :-1],# [300,6+32+1]=>[300,6+32] #dim=1 is 6+32+1=39
             self.args.conf,
             self.args.iou,
             labels=self.lb,
@@ -80,8 +81,9 @@ class ObbSegValidator(DetectionValidator):
             agnostic=self.args.single_cls or self.args.agnostic_nms,
             max_det=self.args.max_det,
             nc=self.nc,
+            # rotated=True,
         )
-        proto = preds[1][-1] if len(preds[1]) == 3 else preds[1]  # second output is len 3 if pt, but only 1 if exported
+        proto = preds[1][-1] if len(preds[1]) == 4 else preds[1]  # second output is len 3 if pt, but only 1 if exported
         return p, proto
 
     def _prepare_batch(self, si, batch):

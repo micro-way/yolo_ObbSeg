@@ -64,7 +64,9 @@ from ultralytics.nn.modules import (
     CBAM,
     MyCBAM,
     MyChannelAttention,
-    MySpacialAtteition
+    MySpacialAtteition,
+
+    ObbSegHead,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -75,6 +77,7 @@ from ultralytics.utils.loss import (
     v8OBBLoss,
     v8PoseLoss,
     v8SegmentationLoss,
+    v8ObbSegLoss,
 )
 from ultralytics.utils.ops import make_divisible
 from ultralytics.utils.plotting import feature_visualization
@@ -335,7 +338,7 @@ class DetectionModel(BaseModel):
                 """Performs a forward pass through the model, handling different Detect subclass types accordingly."""
                 if self.end2end:
                     return self.forward(x)["one2many"]
-                return self.forward(x)[0] if isinstance(m, (Segment, Pose, OBB)) else self.forward(x)
+                return self.forward(x)[0] if isinstance(m, (Segment, Pose, OBB, ObbSegHead)) else self.forward(x)
 
             m.stride = torch.tensor([s / x.shape[-2] for x in _forward(torch.zeros(1, ch, s, s))])  # forward
             self.stride = m.stride
@@ -426,7 +429,7 @@ class ObbSegModel(DetectionModel):
 
     def init_criterion(self):
         """Initialize the loss criterion for the SegmentationModel."""
-        return v8SegmentationLoss(self)
+        return v8ObbSegLoss(self)
 
 
 class PoseModel(DetectionModel):
@@ -1060,11 +1063,13 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
-        elif m in {Detect, WorldDetect, Segment, Pose, OBB, ImagePoolingAttn, v10Detect}:
+        elif m in {Detect, WorldDetect, Segment, Pose, OBB, ImagePoolingAttn, v10Detect, ObbSegHead}:
             args.append([ch[x] for x in f])
             if m is Segment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
-            if m in {Detect, Segment, Pose, OBB}:
+            if m is ObbSegHead:
+                args[2] = make_divisible(min(args[2], max_channels) * width, 8)
+            if m in {Detect, Segment, Pose, OBB, ObbSegHead}:
                 m.legacy = legacy
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1
             args.insert(1, [ch[x] for x in f])
@@ -1184,6 +1189,8 @@ def guess_model_task(model):
                 return "obb"
             elif isinstance(m, (Detect, WorldDetect, v10Detect)):
                 return "detect"
+            elif isinstance(m, ObbSegHead):
+                return "obb_seg"
 
     # Guess from model filename
     if isinstance(model, (str, Path)):
@@ -1194,6 +1201,8 @@ def guess_model_task(model):
             return "classify"
         elif "-pose" in model.stem or "pose" in model.parts:
             return "pose"
+        elif "-obb_seg" in model.stem or "obb_seg" in model.parts:
+            return "obb_seg"
         elif "-obb" in model.stem or "obb" in model.parts:
             return "obb"
         elif "detect" in model.parts:

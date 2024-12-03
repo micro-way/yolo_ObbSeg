@@ -15,7 +15,7 @@ from .conv import Conv, DWConv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
 from .utils import bias_init_with_prob, linear_init
 
-__all__ = "Detect", "Segment", "Pose", "Classify", "OBB", "RTDETRDecoder", "v10Detect"
+__all__ = "Detect", "Segment", "Pose", "Classify", "OBB", "RTDETRDecoder", "v10Detect","ObbSegHead"
 
 
 class Detect(nn.Module):
@@ -225,6 +225,70 @@ class OBB(Detect):
     def decode_bboxes(self, bboxes, anchors):
         """Decode rotated bounding boxes."""
         return dist2rbox(bboxes, self.angle, anchors, dim=1)
+
+
+class ObbSegHead(Detect):
+    """YOLO ObbSeg head for obb_instance_segmentation models."""
+
+    def __init__(self, nc=80, nm=32, npr=256, ch=()):
+        """Initialize the YOLO model attributes such as the number of masks, prototypes, and the convolution layers."""
+        super().__init__(nc, ch)
+        self.nm = nm  # number of masks
+        self.npr = npr  # number of protos
+        self.ne = ne = 1  # number of extra parameters
+        self.proto = Proto(ch[0], self.npr, self.nm)  # protos
+
+        c4 = max(ch[0] // 4, self.nm)
+        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nm, 1)) for x in ch)
+
+        # 定义额外的卷积层cv5，用于生成角度参数
+        # c5是计算得到的通道数，至少为ch[0]//4和ne中的较大值
+        c5 = max(ch[0] // 4, self.ne)
+        self.cv5 = nn.ModuleList([
+            nn.Sequential(Conv(x, c5, 3), Conv(c5, c5, 3), nn.Conv2d(c5, self.ne, 1))
+            for x in ch  # 对每个检测层都定义一个这样的卷积序列
+        ])
+
+    def forward(self, x):
+        if 1:
+            """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
+            p = self.proto(x[0])  # mask protos
+            bs = p.shape[0]  # batch size
+
+            mc = torch.cat([self.cv4[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], 2)  # mask coefficients
+
+            # 通过cv5卷积层生成角度参数（logits），并将它们拼接在一起
+            angle = torch.cat([self.cv5[i](x[i]).view(bs, self.ne, -1) for i in range(self.nl)], 2)
+            # 将角度logits通过sigmoid函数映射到[0, 1]区间，然后转换为[-pi/4, 3pi/4]区间
+            # 注意：这里使用了-0.25的偏移量和math.pi的缩放因子
+            angle = (angle.sigmoid() - 0.25) * math.pi  # [-pi/4, 3pi/4]
+            # 另一种选择是将角度限制在[0, pi/2]区间，但这取决于您的具体需求
+            # angle = angle.sigmoid() * math.pi / 2  # [0, pi/2]
+            # 如果不是训练模式，则将角度参数保存为类的属性，以便decode_bboxes方法使用
+            if not self.training:
+                self.angle = angle
+
+            # 调用父类的forward方法处理输入特征图
+            x = super().forward(x)
+            # 根据训练模式返回不同的输出
+            if self.training:
+                return x, mc, angle, p
+            # 推理模式下返回处理后的特征图和角度参数的拼接结果（或者根据export属性返回不同的格式）
+            return (torch.cat([x, mc, angle], 1), p) if self.export else (torch.cat([x[0], mc, angle], 1), (x[1], mc, angle, p))
+
+            # return (torch.cat([x, mc], 1), p) if self.export else (torch.cat([x[0], mc], 1), (x[1], mc, p))
+            # return torch.cat([x, angle], 1) if self.export else (torch.cat([x[0], angle], 1), (x[1], angle))
+        else:
+            """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
+            p = self.proto(x[0])  # mask protos
+            bs = p.shape[0]  # batch size
+
+            mc = torch.cat([self.cv4[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], 2)  # mask coefficients
+            x = Detect.forward(self, x)
+            if self.training:
+                return x, mc, p
+            return (torch.cat([x, mc], 1), p) if self.export else (torch.cat([x[0], mc], 1), (x[1], mc, p))
+
 
 
 class Pose(Detect):

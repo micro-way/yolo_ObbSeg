@@ -76,7 +76,7 @@ from .conv import (
     MyChannelAttention,
     MySpacialAtteition,
 )
-from .head import OBB, Classify, Detect, Pose, RTDETRDecoder, Segment, WorldDetect, v10Detect
+from .head import OBB, Classify, Detect, Pose, RTDETRDecoder, Segment, WorldDetect, v10Detect, ObbSegHead
 from .transformer import (
     AIFI,
     MLP,
@@ -164,4 +164,5 @@ __all__ = (
     "MyCBAM",
     "MyChannelAttention",
     "MySpacialAtteition",
+    "ObbSegHead",
 )
