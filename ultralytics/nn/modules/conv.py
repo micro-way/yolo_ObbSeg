@@ -21,6 +21,9 @@ __all__ = (
     "CBAM",
     "Concat",
     "RepConv",
+    "MyCBAM",
+    "MyChannelAttention",
+    "MySpacialAtteition",
 )
 
 
@@ -317,6 +320,57 @@ class CBAM(nn.Module):
     def forward(self, x):
         """Applies the forward pass through C1 module."""
         return self.spatial_attention(self.channel_attention(x))
+
+
+class MyChannelAttention(nn.Module):
+    def __init__(self, channle):
+        ratio = 16
+        super(MyChannelAttention, self).__init__()
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channle, channle//ratio),
+            nn.ReLU(),
+            nn.Linear(channle // ratio, channle)
+        )
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        b, c, h, w = x.size()
+        max_pool_out = self.max_pool(x).view([b, c])
+        avg_pool_out = self.avg_pool(x).view([b, c])
+
+        max_fc_out = self.fc(max_pool_out)
+        avg_fc_out = self.fc(avg_pool_out)
+        out = self.sigmoid(max_fc_out + avg_fc_out).view([b, c, 1, 1])
+        return out*x
+
+
+class MySpacialAtteition(nn.Module):
+    def __init__(self, kernel_size=7):
+        super(MySpacialAtteition, self).__init__()
+        self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, stride=1, padding=kernel_size//2)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        max_pool_out = torch.max(x, dim=1, keepdim=True).values
+        avg_pool_out = torch.mean(x, dim=1, keepdim=True)
+        pool_out = torch.cat([max_pool_out, avg_pool_out], dim=1)
+        out = self.sigmoid(self.conv(pool_out))
+        return out*x
+
+
+class MyCBAM(nn.Module):
+    def __init__(self, c1, kernel_size=7):
+        super(MyCBAM, self).__init__()
+        self.channel_attention = MyChannelAttention(c1)
+        self.spacial_atteition = MySpacialAtteition(kernel_size)
+
+    def forward(self, x):
+        x = self.channel_attention(x)
+        x = self.spacial_atteition(x)
+        return x
+
 
 
 class Concat(nn.Module):
