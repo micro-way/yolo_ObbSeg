@@ -230,6 +230,9 @@ class YOLODataset(BaseDataset):
             Can also support classification and semantic segmentation by adding or removing dict keys there.
         """
         bboxes = label.pop("bboxes")
+        if self.use_obb_seg:
+            obb_dota = label.pop("obb_dota")
+        # 数据合并不到label["instances"] = Instances() # 旋转框可以现场建立#用那个生成的代码
         segments = label.pop("segments", [])
         keypoints = label.pop("keypoints", None)
         bbox_format = label.pop("bbox_format")

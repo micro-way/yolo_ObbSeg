@@ -452,11 +452,44 @@ class v8ObbSegLoss(v8DetectionLoss):
         super().__init__(model)
         self.overlap = model.args.overlap_mask
 
+        # obb
+        # self.assigner = RotatedTaskAlignedAssigner(topk=10, num_classes=self.nc, alpha=0.5, beta=6.0)
+        # self.bbox_loss = RotatedBboxLoss(self.reg_max).to(self.device)
+
+    # def preprocess_obb_seg(self, targets, batch_size, scale_tensor):
+    #     """
+    #     预处理目标数据，使其与输入批次大小相匹配并输出一个张量。
+    #
+    #     :param targets: 目标数据。
+    #     :param batch_size: 批次大小。
+    #     :param scale_tensor: 缩放张量。
+    #     :return: 预处理后的目标数据张量。
+    #     """
+    #     if targets.shape[0] == 0:
+    #         out = torch.zeros(batch_size, 0, 6, device=self.device)
+    #     else:
+    #         i = targets[:, 0]  # 图像索引
+    #         _, counts = i.unique(return_counts=True)
+    #         counts = counts.to(dtype=torch.int32)
+    #         out = torch.zeros(batch_size, counts.max(), 6, device=self.device)
+    #         for j in range(batch_size):
+    #             matches = i == j
+    #             n = matches.sum()
+    #             if n:
+    #                 bboxes = targets[matches, 2:]
+    #                 bboxes[..., :4].mul_(scale_tensor)
+    #                 out[j, :n] = torch.cat([targets[matches, 1:2], bboxes], dim=-1)
+    #     return out
+
     def __call__(self, preds, batch):
         """Calculate and return the loss for the YOLO model."""
         loss = torch.zeros(4, device=self.device)  # box, cls, dfl
         # feats, pred_masks, proto = preds if len(preds) == 3 else preds[1]
-        feats, pred_masks, angle, proto = preds if len(preds) == 4 else preds[1]
+        feats, pred_masks, pred_angle, proto = preds if len(preds) == 4 else preds[1]
+
+        # batch_size = pred_angle.shape[0]  # 批次大小
+
+        # todo: v8ObbSegLoss中的 __call__()，利用batch生成旋转框参数
 
 
         batch_size, _, mask_h, mask_w = proto.shape  # batch size, number of masks, mask height, mask width
@@ -477,6 +510,7 @@ class v8ObbSegLoss(v8DetectionLoss):
         try:
             batch_idx = batch["batch_idx"].view(-1, 1)
             targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"]), 1)
+            # 这里用的od的preprocess
             targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
             gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
             mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
