@@ -7,7 +7,7 @@ def main():
     #     'yoloobb-data\\yolov8n-obb.pt')  # build from YAML and transfer weights
 
     # # OBB
-    # model = YOLO('yolov8-obb.yaml',task="obb_seg")
+    # model = YOLO('yolov8-obb.yaml',task="obb")
     # model.train(data='yoloobb-data\\data_obb.yaml', epochs=20, imgsz=1024, batch=2, workers=4, patience=2000, )
 
     # # # SEG

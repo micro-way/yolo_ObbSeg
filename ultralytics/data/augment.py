@@ -2056,6 +2056,8 @@ class Format:
             if self.normalize:
                 labels["keypoints"][..., 0] /= w
                 labels["keypoints"][..., 1] /= h
+        # 把这里的self.return_obb = self.use_obb or self.use_obb_seg  in dataset.py function build_transforms()
+        # 在数据输入时只用segment就可以得到输出时的obb_seg
         if self.return_obb:
             labels["bboxes"] = (
                 xyxyxyxy2xywhr(torch.from_numpy(instances.segments)) if len(instances.segments) else torch.zeros((0, 5))

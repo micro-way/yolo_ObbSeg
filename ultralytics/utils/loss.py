@@ -509,6 +509,9 @@ class v8ObbSegLoss(v8DetectionLoss):
         # Targets
         try:
             batch_idx = batch["batch_idx"].view(-1, 1)
+            # todo : 强行将batch改为正向seg版本的
+            batch["bboxes"] = batch["bboxes"][:, :4]
+
             targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"]), 1)
             # 这里用的od的preprocess
             targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
