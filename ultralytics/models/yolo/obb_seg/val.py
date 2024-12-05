@@ -39,6 +39,7 @@ class ObbSegValidator(DetectionValidator):
 
     def preprocess(self, batch):
         """Preprocesses batch by converting masks to float and sending to device."""
+        batch["bboxes_angle"] = batch["bboxes"][:, 4].to(self.device).float()
         batch = super().preprocess(batch)
         batch["masks"] = batch["masks"].to(self.device).float()
         return batch
@@ -116,6 +117,7 @@ class ObbSegValidator(DetectionValidator):
     def _prepare_batch(self, si, batch):
         """Prepares a batch for training or inference by processing images and targets."""
         # todo: 强行将batch改为正向seg版本的
+        # batch["bboxes_angle"] = batch["bboxes"][:, 4]
         batch["bboxes"] = batch["bboxes"][:, :4]
 
         prepared_batch = super()._prepare_batch(si, batch)
@@ -251,11 +253,16 @@ class ObbSegValidator(DetectionValidator):
 
     def plot_val_samples(self, batch, ni):
         """Plots validation samples with bounding box labels."""
+        if "bboxes_angle" in batch:
+            batch_bboxes5 = torch.cat([batch["bboxes"], (batch["bboxes_angle"]).unsqueeze(1)], dim=1)
+        else:
+            batch_bboxes5 = batch["bboxes"]
         plot_images(
             batch["img"],
             batch["batch_idx"],
             batch["cls"].squeeze(-1),
-            batch["bboxes"],
+            # batch["bboxes"],
+            batch_bboxes5,
             masks=batch["masks"],
             paths=batch["im_file"],
             fname=self.save_dir / f"val_batch{ni}_labels.jpg",
