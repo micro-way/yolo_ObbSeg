@@ -11,7 +11,8 @@ from ultralytics.models.yolo.detect import DetectionValidator
 from ultralytics.utils import LOGGER, NUM_THREADS, ops
 from ultralytics.utils.checks import check_requirements
 from ultralytics.utils.metrics import SegmentMetrics, box_iou, mask_iou
-from ultralytics.utils.plotting import output_to_target, plot_images
+from ultralytics.utils.plotting import output_to_target, output_to_rotated_target, plot_images
+from ultralytics.utils.ops import xywh2xyxy
 
 
 class ObbSegValidator(DetectionValidator):
@@ -72,7 +73,9 @@ class ObbSegValidator(DetectionValidator):
 
     def postprocess(self, preds):
         """Post-processes YOLO predictions and returns output detections with proto."""
-        # todo : maybe need to modify function ops.non_max_suppression for obb_seg
+        # todo : 这里要改，支持obb_seg 这里的preds是[2+(4+1)+32,300]
+        #  maybe need to modify function ops.non_max_suppression for obb_seg
+
         # p = ops.non_max_suppression(
         #     preds[0][:, :-1],# [(2+4)+32+1, 300]=>[(2+4)+32,300] #dim=1 is 6+32+1=39
         #     self.args.conf,
@@ -85,9 +88,10 @@ class ObbSegValidator(DetectionValidator):
         #     # rotated=True,
         # )
 
-        # 这里强行使用旋转且没有给监督正则，应当无法起到效果
-        # 这个代码也不对，看看obb是什么格式的数据
-        # 这个格式可能是对的，但是也看看 return ，如何和seg兼容
+        # # 这里强行使用旋转且没有给监督正则，应当无法起到效果
+        # # 这个代码也不对，看看obb是什么格式的数据
+        # # 这个格式可能是对的，但是也看看 return ，如何和seg兼容
+        # preds_mask32 = (preds[0][:, 6:(6+32), :]).to(self.device).float()
         # p = ops.non_max_suppression(
         #     torch.cat([preds[0][:, :6,:], (preds[0][:, -1,:]).unsqueeze(1)], dim=1),# [(2+4)+32+1, 300]=>[(2+4)+1,300] #dim=1 is 6+32+1=39
         #     self.args.conf,
@@ -99,9 +103,12 @@ class ObbSegValidator(DetectionValidator):
         #     nc=self.nc,
         #     rotated=True,
         # )
+        # p = torch.cat([p[:, :6,:],preds_mask32, (p[:, -1,:]).unsqueeze(1)], dim=1)
 
         p = ops.non_max_suppression(
-            preds[0][:, :-1],# [(2+4)+32+1, 300]=>[(2+4)+32,300] #dim=1 is 6+32+1=39
+            preds[0],
+            # preds[0][:, :-1],# [(2+4)+32+1, 300]=>[(2+4)+32,300] #dim=1 is 6+32+1=39
+            # (torch.cat([preds[0][:, :6, :], (preds[0][:, -1, :]).unsqueeze(1)], dim=1), (preds[1][0], preds[1][2])),
             self.args.conf,
             self.args.iou,
             labels=self.lb,
@@ -109,8 +116,10 @@ class ObbSegValidator(DetectionValidator):
             agnostic=self.args.single_cls or self.args.agnostic_nms,
             max_det=self.args.max_det,
             nc=self.nc,
-            # rotated=True,
+            rotated=True,
         )
+        # 改xywh到xyxy #兼容正矩形的loss
+        p = [torch.cat([xywh2xyxy(pp[:, :4]), pp[:, 4:]], dim=1) for pp in p]
         proto = preds[1][-1] if len(preds[1]) == 4 else preds[1]  # second output is len 3 if pt, but only 1 if exported
         return p, proto
 
@@ -128,7 +137,10 @@ class ObbSegValidator(DetectionValidator):
     def _prepare_pred(self, pred, pbatch, proto):
         """Prepares a batch for training or inference by processing images and targets."""
         predn = super()._prepare_pred(pred, pbatch)
-        pred_masks = self.process(proto, pred[:, 6:], pred[:, :4], shape=pbatch["imgsz"])
+        # predn = predn[:, :-1]
+        # pred_masks = self.process(proto, pred[:, 6:], pred[:, :4], shape=pbatch["imgsz"])
+        # 不要最后一个角度
+        pred_masks = self.process(proto, pred[:, 6:-1], pred[:, :4], shape=pbatch["imgsz"])
         return predn, pred_masks
 
     def update_metrics(self, preds, batch):
@@ -272,15 +284,36 @@ class ObbSegValidator(DetectionValidator):
 
     def plot_predictions(self, batch, preds, ni):
         """Plots batch predictions with masks and bounding boxes."""
+        # todo :output_to_rotated_target() 替换output_to_rotated_target
+        # 这里的preds[0]时[300,2+(4)+32] # 没有旋转
+        # 这里可能要将
+        # plot_images(
+        #     batch["img"],
+        #     *output_to_target(preds[0], max_det=15),  # not set to self.args.max_det due to slow plotting speed
+        #     torch.cat(self.plot_masks, dim=0) if len(self.plot_masks) else self.plot_masks,
+        #     paths=batch["im_file"],
+        #     fname=self.save_dir / f"val_batch{ni}_pred.jpg",
+        #     names=self.names,
+        #     on_plot=self.on_plot,
+        # )  # pred
+        output = output_to_target([p[:,:-1]for p in preds[0]], max_det=15)
+        output_rotate = output_to_rotated_target([torch.cat([p[:, :6], (p[:, -1]).unsqueeze(1)], dim=1)for p in preds[0]], max_det=15)
+        # 替换4+1带旋转的解码输出
+        outputs = (output[0], output[1], output_rotate[2], output[3])
         plot_images(
             batch["img"],
-            *output_to_target(preds[0], max_det=15),  # not set to self.args.max_det due to slow plotting speed
+            # [xxx,6+32+1]=>[xxx,6+1]
+            #
+            # *output_to_target(preds[0], max_det=15),  # not set to self.args.max_det due to slow plotting speed
+            # *output_to_rotated_target([torch.cat([p[:, :6], (p[:, -1]).unsqueeze(1)], dim=1)for p in preds[0]], max_det=15),
+            * outputs,
             torch.cat(self.plot_masks, dim=0) if len(self.plot_masks) else self.plot_masks,
             paths=batch["im_file"],
             fname=self.save_dir / f"val_batch{ni}_pred.jpg",
             names=self.names,
             on_plot=self.on_plot,
         )  # pred
+
         self.plot_masks.clear()
 
     def save_one_txt(self, predn, pred_masks, save_conf, shape, file):
