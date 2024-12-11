@@ -49,16 +49,16 @@ class ObbSegTrainer(yolo.detect.DetectionTrainer):
 
     def plot_training_samples(self, batch, ni):
         """Creates a plot of training sample images with labels and box coordinates."""
-        if "bboxes_angle" in batch:
-            batch_bboxes5 = torch.cat([batch["bboxes"], (batch["bboxes_angle"]).unsqueeze(1)], dim=1)
-        else:
-            batch_bboxes5 = batch["bboxes"]
+        # if "bboxes_angle" in batch:
+        #     batch_bboxes5 = torch.cat([batch["bboxes"], (batch["bboxes_angle"]).unsqueeze(1)], dim=1)
+        # else:
+        #     batch_bboxes5 = batch["bboxes"]
         plot_images(
             batch["img"],
             batch["batch_idx"],
             batch["cls"].squeeze(-1),
-            # batch["bboxes"],
-            batch_bboxes5,
+            batch["bboxes"],
+            # batch_bboxes5,
             masks=batch["masks"],
             paths=batch["im_file"],
             fname=self.save_dir / f"train_batch{ni}.jpg",

@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from ultralytics.models.yolo.detect import DetectionValidator
 from ultralytics.utils import LOGGER, NUM_THREADS, ops
 from ultralytics.utils.checks import check_requirements
-from ultralytics.utils.metrics import SegmentMetrics, box_iou, mask_iou
+from ultralytics.utils.metrics import SegmentMetrics, box_iou, mask_iou, batch_probiou, ObbSegMetrics
 from ultralytics.utils.plotting import output_to_target, output_to_rotated_target, plot_images
 from ultralytics.utils.ops import xywh2xyxy
 
@@ -36,11 +36,11 @@ class ObbSegValidator(DetectionValidator):
         self.process = None
         # self.args.task = "segment"
         self.args.task = "obb_seg"
-        self.metrics = SegmentMetrics(save_dir=self.save_dir, on_plot=self.on_plot)
+        self.metrics = ObbSegMetrics(save_dir=self.save_dir, on_plot=self.on_plot)
 
     def preprocess(self, batch):
         """Preprocesses batch by converting masks to float and sending to device."""
-        batch["bboxes_angle"] = batch["bboxes"][:, 4].to(self.device).float()
+        # batch["bboxes_angle"] = batch["bboxes"][:, 4].to(self.device).float()
         batch = super().preprocess(batch)
         batch["masks"] = batch["masks"].to(self.device).float()
         return batch
@@ -88,7 +88,7 @@ class ObbSegValidator(DetectionValidator):
         #     # rotated=True,
         # )
 
-        # # 这里强行使用旋转且没有给监督正则，应当无法起到效果
+        # # 这里使用旋转且没有给监督正则，应当无法起到效果
         # # 这个代码也不对，看看obb是什么格式的数据
         # # 这个格式可能是对的，但是也看看 return ，如何和seg兼容
         # preds_mask32 = (preds[0][:, 6:(6+32), :]).to(self.device).float()
@@ -118,28 +118,38 @@ class ObbSegValidator(DetectionValidator):
             nc=self.nc,
             rotated=True,
         )
-        # 改xywh到xyxy #兼容正矩形的loss
-        p = [torch.cat([xywh2xyxy(pp[:, :4]), pp[:, 4:]], dim=1) for pp in p]
+        # 改xywh到xyxy #兼容正矩形的loss # 但是注释这个才能兼容obb # 用这个才能mask
+        # p = [torch.cat([xywh2xyxy(pp[:, :4]), pp[:, 4:]], dim=1) for pp in p]
         proto = preds[1][-1] if len(preds[1]) == 4 else preds[1]  # second output is len 3 if pt, but only 1 if exported
         return p, proto
 
     def _prepare_batch(self, si, batch):
         """Prepares a batch for training or inference by processing images and targets."""
-        # todo: 强行将batch改为正向seg版本的
+        # # todo: 强行将batch改为正向seg版本的
         # batch["bboxes_angle"] = batch["bboxes"][:, 4]
-        batch["bboxes"] = batch["bboxes"][:, :4]
+        # batch["bboxes"] = batch["bboxes"][:, :4]
 
-        prepared_batch = super()._prepare_batch(si, batch)
+        idx = batch["batch_idx"] == si
+        cls = batch["cls"][idx].squeeze(-1)
+        bbox = batch["bboxes"][idx]
+        ori_shape = batch["ori_shape"][si]
+        imgsz = batch["img"].shape[2:]
+        ratio_pad = batch["ratio_pad"][si]
+        if len(cls):
+            bbox[..., :4].mul_(torch.tensor(imgsz, device=self.device)[[1, 0, 1, 0]])  # target boxes
+            ops.scale_boxes(imgsz, bbox, ori_shape, ratio_pad=ratio_pad, xywh=True)  # native-space labels
+
+        # prepared_batch = super()._prepare_batch(si, batch)
         midx = [si] if self.args.overlap_mask else batch["batch_idx"] == si
-        prepared_batch["masks"] = batch["masks"][midx]
-        return prepared_batch
+        masks = batch["masks"][midx]
+        return {"cls": cls, "bbox": bbox, "ori_shape": ori_shape, "imgsz": imgsz, "ratio_pad": ratio_pad,"masks":masks}
 
     def _prepare_pred(self, pred, pbatch, proto):
         """Prepares a batch for training or inference by processing images and targets."""
         predn = super()._prepare_pred(pred, pbatch)
         # predn = predn[:, :-1]
         # pred_masks = self.process(proto, pred[:, 6:], pred[:, :4], shape=pbatch["imgsz"])
-        # 不要最后一个角度
+        # 强行不要最后一个角度
         pred_masks = self.process(proto, pred[:, 6:-1], pred[:, :4], shape=pbatch["imgsz"])
         return predn, pred_masks
 
@@ -222,8 +232,8 @@ class ObbSegValidator(DetectionValidator):
         Compute correct prediction matrix for a batch based on bounding boxes and optional masks.
 
         Args:
-            detections (torch.Tensor): Tensor of shape (N, 6) representing detected bounding boxes and
-                associated confidence scores and class indices. Each row is of the format [x1, y1, x2, y2, conf, class].
+            detections (torch.Tensor): Tensor of shape (N, 6+1) representing detected bounding boxes and
+                associated confidence scores and class indices. Each row is of the format [x1, y1, x2, y2, conf, class,rotate].
             gt_bboxes (torch.Tensor): Tensor of shape (M, 4) representing ground truth bounding box coordinates.
                 Each row is of the format [x1, y1, x2, y2].
             gt_cls (torch.Tensor): Tensor of shape (M,) representing ground truth class indices.
@@ -259,22 +269,23 @@ class ObbSegValidator(DetectionValidator):
                 gt_masks = gt_masks.gt_(0.5)
             iou = mask_iou(gt_masks.view(gt_masks.shape[0], -1), pred_masks.view(pred_masks.shape[0], -1))
         else:  # boxes
-            iou = box_iou(gt_bboxes, detections[:, :4])
+            # iou = box_iou(gt_bboxes, detections[:, :4])
+            iou = batch_probiou(gt_bboxes, torch.cat([detections[:, :4], detections[:, -1:]], dim=-1))
 
         return self.match_predictions(detections[:, 5], gt_cls, iou)
 
     def plot_val_samples(self, batch, ni):
         """Plots validation samples with bounding box labels."""
-        if "bboxes_angle" in batch:
-            batch_bboxes5 = torch.cat([batch["bboxes"], (batch["bboxes_angle"]).unsqueeze(1)], dim=1)
-        else:
-            batch_bboxes5 = batch["bboxes"]
+        # if "bboxes_angle" in batch:
+        #     batch_bboxes5 = torch.cat([batch["bboxes"], (batch["bboxes_angle"]).unsqueeze(1)], dim=1)
+        # else:
+        #     batch_bboxes5 = batch["bboxes"]
         plot_images(
             batch["img"],
             batch["batch_idx"],
             batch["cls"].squeeze(-1),
-            # batch["bboxes"],
-            batch_bboxes5,
+            batch["bboxes"],
+            # batch_bboxes5,
             masks=batch["masks"],
             paths=batch["im_file"],
             fname=self.save_dir / f"val_batch{ni}_labels.jpg",

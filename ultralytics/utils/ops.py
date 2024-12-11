@@ -651,6 +651,50 @@ def crop_mask(masks, boxes):
 
     return masks * ((r >= x1) * (r < x2) * (c >= y1) * (c < y2))
 
+def crop_mask_obb_seg(masks, boxes):
+    """
+    It takes a mask and a bounding box, and returns a mask that is cropped to the bounding box.
+
+    Args:
+        masks (torch.Tensor): [n, h, w] tensor of masks
+        boxes (torch.Tensor): [n, 4+1] tensor of bbox coordinates in relative point form
+
+    Returns:
+        (torch.Tensor): The masks are being cropped to the bounding box.
+    """
+    n, h, w = masks.shape
+    x1, y1, x2, y2, angle = torch.chunk(boxes, 5, dim=1)
+
+    # Compute the center, width, and height of each bounding box
+    cx = (x1 + x2) / 2
+    cy = (y1 + y2) / 2
+    bw = x2 - x1
+    bh = y2 - y1
+
+    # Create an affine transformation matrix for rotation
+    cos_a = torch.cos(angle)
+    sin_a = torch.sin(angle)
+    affine_matrix = torch.cat([
+        cos_a, -sin_a, cx - cx * cos_a + cy * sin_a,
+        sin_a,  cos_a, cy - cx * sin_a - cy * cos_a
+    ], dim=1).reshape(-1, 2, 3)  # [n, 2, 3]
+
+    # Perform affine transformation on the masks
+    grid = torch.nn.functional.affine_grid(affine_matrix, size=(n, 1, h, w), align_corners=False)
+    rotated_masks = torch.nn.functional.grid_sample(masks.unsqueeze(1).float(), grid, align_corners=False).squeeze(1)
+
+    # Crop the masks within the original bounding box
+    r = torch.arange(w, device=masks.device, dtype=masks.dtype).view(1, 1, w)
+    c = torch.arange(h, device=masks.device, dtype=masks.dtype).view(1, h, 1)
+
+    x1, y1, x2, y2 = x1.view(n, 1, 1), y1.view(n, 1, 1), x2.view(n, 1, 1), y2.view(n, 1, 1)
+    cropped_masks = rotated_masks * ((r >= x1) & (r < x2) & (c >= y1) & (c < y2))
+
+    return cropped_masks
+
+
+
+
 
 def process_mask(protos, masks_in, bboxes, shape, upsample=False):
     """
