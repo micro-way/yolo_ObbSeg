@@ -187,7 +187,24 @@ class BaseValidator:
             # Postprocess
             with dt[3]:
                 preds = self.postprocess(preds)
-
+            # #todo debug
+            # #debug plt 2
+            # import numpy as np
+            # import matplotlib.pyplot as plt
+            # cur_epoch = trainer.epoch+1
+            #
+            # if(cur_epoch%10==0):
+            #
+            #     gt_masks0 = np.array(batch["masks"][0].clone().cpu())
+            #     # wrong
+            #     pred_masks0 = np.array(batch["masks"][0].clone().cpu())
+            #     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+            #     ax1.imshow(gt_masks0, cmap='viridis', interpolation='nearest')
+            #     ax2.imshow(pred_masks0, cmap='viridis', interpolation='nearest')
+            #     plt.show()
+            #
+            # #debug plt end
+            # # end debug
             self.update_metrics(preds, batch)
             if self.args.plots and batch_i < 3:
                 self.plot_val_samples(batch, batch_i)

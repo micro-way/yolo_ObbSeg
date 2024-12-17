@@ -399,6 +399,9 @@ def xyxy2xywh(x):
     Returns:
         y (np.ndarray | torch.Tensor): The bounding box coordinates in (x, y, width, height) format.
     """
+    if x.shape[-1] != 4:
+        while 1:
+            a=1
     assert x.shape[-1] == 4, f"input shape last dimension expected 4 but input shape is {x.shape}"
     y = torch.empty_like(x) if isinstance(x, torch.Tensor) else np.empty_like(x)  # faster than clone/copy
     y[..., 0] = (x[..., 0] + x[..., 2]) / 2  # x center
@@ -644,6 +647,7 @@ def crop_mask(masks, boxes):
     Returns:
         (torch.Tensor): The masks are being cropped to the bounding box.
     """
+    # 掩码保留左上为x1y1，右下为x2，y2的部分
     _, h, w = masks.shape
     x1, y1, x2, y2 = torch.chunk(boxes[:, :, None], 4, 1)  # x1 shape(n,1,1)
     r = torch.arange(w, device=masks.device, dtype=x1.dtype)[None, None, :]  # rows shape(1,1,w)
@@ -653,44 +657,158 @@ def crop_mask(masks, boxes):
 
 def crop_mask_obb_seg(masks, boxes):
     """
-    It takes a mask and a bounding box, and returns a mask that is cropped to the bounding box.
+    根据旋转矩形裁剪掩码。
 
     Args:
-        masks (torch.Tensor): [n, h, w] tensor of masks
-        boxes (torch.Tensor): [n, 4+1] tensor of bbox coordinates in relative point form
+        masks (torch.Tensor): [n, h, w] 张量，表示 n 个掩码，每个大小为 h x w。
+        boxes (torch.Tensor): [n, 5] 张量，表示 n 个旋转矩形，格式为 (x1, y1, x2, y2, r)，
+                              其中 r 是旋转角度（弧度）。
 
     Returns:
-        (torch.Tensor): The masks are being cropped to the bounding box.
+        torch.Tensor: 裁剪后的掩码，与输入掩码形状相同。
     """
     n, h, w = masks.shape
-    x1, y1, x2, y2, angle = torch.chunk(boxes, 5, dim=1)
 
-    # Compute the center, width, and height of each bounding box
-    cx = (x1 + x2) / 2
-    cy = (y1 + y2) / 2
-    bw = x2 - x1
-    bh = y2 - y1
+    # 从 boxes 中提取 x1, y1, x2, y2 和旋转角度 r
+    x1, y1, x2, y2, r = torch.chunk(boxes, 5, dim=1)  # 每个形状为 [n, 1]
 
-    # Create an affine transformation matrix for rotation
-    cos_a = torch.cos(angle)
-    sin_a = torch.sin(angle)
-    affine_matrix = torch.cat([
-        cos_a, -sin_a, cx - cx * cos_a + cy * sin_a,
-        sin_a,  cos_a, cy - cx * sin_a - cy * cos_a
-    ], dim=1).reshape(-1, 2, 3)  # [n, 2, 3]
+    # 计算旋转矩形的中心点和宽高
+    cx = (x1 + x2) / 2  # 中心点 x 坐标，形状 [n, 1]
+    cy = (y1 + y2) / 2  # 中心点 y 坐标，形状 [n, 1]
+    w_box = x2 - x1     # 矩形宽度，形状 [n, 1]
+    h_box = y2 - y1     # 矩形高度，形状 [n, 1]
 
-    # Perform affine transformation on the masks
-    grid = torch.nn.functional.affine_grid(affine_matrix, size=(n, 1, h, w), align_corners=False)
-    rotated_masks = torch.nn.functional.grid_sample(masks.unsqueeze(1).float(), grid, align_corners=False).squeeze(1)
+    # 生成网格坐标
+    grid_y, grid_x = torch.meshgrid(
+        torch.arange(h, device=masks.device, dtype=masks.dtype),
+        torch.arange(w, device=masks.device, dtype=masks.dtype),
+        indexing="ij"
+    )
+    grid = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(0)  # [1, h, w, 2]
 
-    # Crop the masks within the original bounding box
-    r = torch.arange(w, device=masks.device, dtype=masks.dtype).view(1, 1, w)
-    c = torch.arange(h, device=masks.device, dtype=masks.dtype).view(1, h, 1)
+    # 转换到矩形的局部坐标系
+    grid_centered = grid - torch.cat([cx, cy], dim=1).view(n, 1, 1, 2)  # [n, h, w, 2]
 
-    x1, y1, x2, y2 = x1.view(n, 1, 1), y1.view(n, 1, 1), x2.view(n, 1, 1), y2.view(n, 1, 1)
-    cropped_masks = rotated_masks * ((r >= x1) & (r < x2) & (c >= y1) & (c < y2))
+    # 计算旋转矩阵
+    cos_r = torch.cos(-r).view(n, 1, 1)
+    sin_r = torch.sin(-r).view(n, 1, 1)
+    rotation_matrix = torch.stack([
+        torch.stack([cos_r, sin_r], dim=-1),
+        torch.stack([-sin_r, cos_r], dim=-1)
+    ], dim=-2)  # [n, 2, 2]
 
-    return cropped_masks
+    # 旋转坐标
+    grid_rotated = torch.matmul(grid_centered.unsqueeze(-2), rotation_matrix).squeeze(-2)  # [n, h, w, 2]
+
+    # 判断点是否在矩形内
+    in_box = (
+        (grid_rotated[..., 0] >= -w_box.view(n, 1, 1) / 2) &
+        (grid_rotated[..., 0] <= w_box.view(n, 1, 1) / 2) &
+        (grid_rotated[..., 1] >= -h_box.view(n, 1, 1) / 2) &
+        (grid_rotated[..., 1] <= h_box.view(n, 1, 1) / 2)
+    )  # [n, h, w]
+
+    # 将布尔掩码与原始掩码相乘
+    return masks * in_box
+
+    # """
+    # 根据旋转边界框裁剪掩码。
+    #
+    # Args:
+    #     masks (torch.Tensor): [n, h, w] 张量，表示 n 个掩码，每个大小为 h x w。
+    #     boxes (torch.Tensor): [n, 5] 张量，表示 n 个边界框，格式为 (x1, y1, x2, y2, r)，
+    #                           其中 r 是旋转角度（弧度）。
+    #
+    # Returns:
+    #     torch.Tensor: 裁剪后的掩码，与输入掩码形状相同。
+    # """
+    # _, h, w = masks.shape
+    # x1, y1, x2, y2, r = torch.chunk(boxes[:, :, None], 5, 1)  # 分割为 x1, y1, x2, y2, r，每个维度 [n, 1, 1]
+    # r = r.squeeze(-1)
+    # # 计算旋转中心（边界框中心）
+    # cx = (x1 + x2) / 2  # 中心 x 坐标
+    # cy = (y1 + y2) / 2  # 中心 y 坐标
+    #
+    # # 计算边界框四个顶点的坐标（相对于中心点旋转）
+    # corners = torch.stack([
+    #     torch.cat([x1.squeeze(-1), y1.squeeze(-1)], dim=-1),
+    #     torch.cat([x2.squeeze(-1), y1.squeeze(-1)], dim=-1),
+    #     torch.cat([x2.squeeze(-1), y2.squeeze(-1)], dim=-1),
+    #     torch.cat([x1.squeeze(-1), y2.squeeze(-1)], dim=-1)
+    # ], dim=1)  # 形状 [n, 4, 2]
+    #
+    # # 旋转矩阵
+    # cos_r = torch.cos(r)
+    # sin_r = torch.sin(r)
+    # rotation_matrix = torch.stack([
+    #     torch.cat([cos_r, -sin_r], dim=-1),
+    #     torch.cat([sin_r, cos_r], dim=-1)
+    # ], dim=1)  # 形状 [n, 2, 2]
+    #
+    # # 旋转顶点坐标
+    # rotated_corners = torch.matmul(corners - torch.cat([cx, cy], dim=-1), rotation_matrix) + torch.cat([cx, cy], dim=-1)
+    #
+    # # 生成网格点坐标
+    # grid_x, grid_y = torch.meshgrid(
+    #     torch.arange(w, device=masks.device, dtype=torch.float32),
+    #     torch.arange(h, device=masks.device, dtype=torch.float32),
+    #     indexing="xy"
+    # )
+    # grid = torch.stack([grid_x, grid_y], dim=-1)  # 形状 [h, w, 2]
+    #
+    # # 检查点是否在旋转后的边界框内
+    # def is_point_in_rotated_box(point, corners):
+    #     # 使用叉积检查点是否在旋转后的多边形内
+    #     vectors = corners - torch.roll(corners, shifts=-1, dims=0)  # 每条边的向量
+    #     point_vectors = point - corners
+    #     cross_products = torch.cross(vectors, point_vectors, dim=-1)
+    #     return (cross_products >= 0).all(dim=-1)  # 判断是否在所有边的同侧
+    #
+    # mask_result = torch.zeros_like(masks, dtype=torch.bool)
+    # for i in range(masks.shape[0]):
+    #     mask_result[i] = is_point_in_rotated_box(grid, rotated_corners[i])
+    #
+    # return masks * mask_result
+    # """
+    # It takes a mask and a bounding box, and returns a mask that is cropped to the bounding box.
+    #
+    # Args:
+    #     masks (torch.Tensor): [n, h, w] tensor of masks
+    #     boxes (torch.Tensor): [n, 4+1] tensor of bbox coordinates in relative point form
+    #
+    # Returns:
+    #     (torch.Tensor): The masks are being cropped to the bounding box.
+    # """
+    # # 掩码保留==>左上为x1y1，右下为x2，y2的部分 且旋转 rot角度的
+    # n, h, w = masks.shape
+    # x1, y1, x2, y2, angle = torch.chunk(boxes, 5, dim=1)
+    #
+    # # Compute the center, width, and height of each bounding box
+    # cx = (x1 + x2) / 2
+    # cy = (y1 + y2) / 2
+    # bw = x2 - x1
+    # bh = y2 - y1
+    #
+    # # Create an affine transformation matrix for rotation
+    # cos_a = torch.cos(angle)
+    # sin_a = torch.sin(angle)
+    # affine_matrix = torch.cat([
+    #     cos_a, -sin_a, cx - cx * cos_a + cy * sin_a,
+    #     sin_a,  cos_a, cy - cx * sin_a - cy * cos_a
+    # ], dim=1).reshape(-1, 2, 3)  # [n, 2, 3]
+    #
+    # # Perform affine transformation on the masks
+    # grid = torch.nn.functional.affine_grid(affine_matrix, size=(n, 1, h, w), align_corners=False)
+    # rotated_masks = torch.nn.functional.grid_sample(masks.unsqueeze(1).float(), grid, align_corners=False).squeeze(1)
+    #
+    # # Crop the masks within the original bounding box
+    # r = torch.arange(w, device=masks.device, dtype=masks.dtype).view(1, 1, w)
+    # c = torch.arange(h, device=masks.device, dtype=masks.dtype).view(1, h, 1)
+    #
+    # x1, y1, x2, y2 = x1.view(n, 1, 1), y1.view(n, 1, 1), x2.view(n, 1, 1), y2.view(n, 1, 1)
+    # cropped_masks = rotated_masks * ((r >= x1) & (r < x2) & (c >= y1) & (c < y2))
+    #
+    # return cropped_masks
 
 
 
@@ -722,8 +840,48 @@ def process_mask(protos, masks_in, bboxes, shape, upsample=False):
     downsampled_bboxes[:, 2] *= width_ratio
     downsampled_bboxes[:, 3] *= height_ratio
     downsampled_bboxes[:, 1] *= height_ratio
+    # downsampled_bboxes[:, 4] = bboxes[:, 4]
 
-    masks = crop_mask(masks, downsampled_bboxes)  # CHW
+    if downsampled_bboxes.shape[-1]==5:
+        masks = crop_mask_obb_seg(masks, downsampled_bboxes)  # CHW
+    else:
+        masks = crop_mask(masks, downsampled_bboxes)  # CHW
+    if upsample:
+        masks = F.interpolate(masks[None], shape, mode="bilinear", align_corners=False)[0]  # CHW
+    return masks.gt_(0.0)
+
+def process_mask_obb_seg(protos, masks_in, bboxes, shape, upsample=False):
+    """
+    Apply masks to bounding boxes using the output of the mask head.
+
+    Args:
+        protos (torch.Tensor): A tensor of shape [mask_dim, mask_h, mask_w].
+        masks_in (torch.Tensor): A tensor of shape [n, mask_dim], where n is the number of masks after NMS.
+        bboxes (torch.Tensor): A tensor of shape [n, 4+1], where n is the number of masks after NMS.
+        shape (tuple): A tuple of integers representing the size of the input image in the format (h, w).
+        upsample (bool): A flag to indicate whether to upsample the mask to the original image size. Default is False.
+
+    Returns:
+        (torch.Tensor): A binary mask tensor of shape [n, h, w], where n is the number of masks after NMS, and h and w
+            are the height and width of the input image. The mask is applied to the bounding boxes.
+    """
+    c, mh, mw = protos.shape  # CHW
+    ih, iw = shape
+
+    masks = (masks_in @ protos.float().view(c, -1)).view(-1, mh, mw)  # CHW
+    width_ratio = mw / iw
+    height_ratio = mh / ih
+    # bboxes  是xyxy的结构
+    bboxes4 = xywh2xyxy(bboxes[..., :4])
+    bboxes = torch.cat([bboxes4, bboxes[:, -1:]], dim=1)
+
+    downsampled_bboxes = bboxes.clone()
+    downsampled_bboxes[:, 0] *= width_ratio
+    downsampled_bboxes[:, 2] *= width_ratio
+    downsampled_bboxes[:, 3] *= height_ratio
+    downsampled_bboxes[:, 1] *= height_ratio
+
+    masks = crop_mask_obb_seg(masks, downsampled_bboxes)  # CHW
     if upsample:
         masks = F.interpolate(masks[None], shape, mode="bilinear", align_corners=False)[0]  # CHW
     return masks.gt_(0.0)

@@ -40,7 +40,6 @@ class ObbSegValidator(DetectionValidator):
 
     def preprocess(self, batch):
         """Preprocesses batch by converting masks to float and sending to device."""
-        # batch["bboxes_angle"] = batch["bboxes"][:, 4].to(self.device).float()
         batch = super().preprocess(batch)
         batch["masks"] = batch["masks"].to(self.device).float()
         return batch
@@ -52,7 +51,7 @@ class ObbSegValidator(DetectionValidator):
         if self.args.save_json:
             check_requirements("pycocotools>=2.0.6")
         # more accurate vs faster
-        self.process = ops.process_mask_native if self.args.save_json or self.args.save_txt else ops.process_mask
+        self.process = ops.process_mask_native if self.args.save_json or self.args.save_txt else ops.process_mask_obb_seg
         self.stats = dict(tp_m=[], tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
 
     def get_desc(self):
@@ -91,19 +90,7 @@ class ObbSegValidator(DetectionValidator):
         # # 这里使用旋转且没有给监督正则，应当无法起到效果
         # # 这个代码也不对，看看obb是什么格式的数据
         # # 这个格式可能是对的，但是也看看 return ，如何和seg兼容
-        # preds_mask32 = (preds[0][:, 6:(6+32), :]).to(self.device).float()
-        # p = ops.non_max_suppression(
-        #     torch.cat([preds[0][:, :6,:], (preds[0][:, -1,:]).unsqueeze(1)], dim=1),# [(2+4)+32+1, 300]=>[(2+4)+1,300] #dim=1 is 6+32+1=39
-        #     self.args.conf,
-        #     self.args.iou,
-        #     labels=self.lb,
-        #     multi_label=True,
-        #     agnostic=self.args.single_cls or self.args.agnostic_nms,
-        #     max_det=self.args.max_det,
-        #     nc=self.nc,
-        #     rotated=True,
-        # )
-        # p = torch.cat([p[:, :6,:],preds_mask32, (p[:, -1,:]).unsqueeze(1)], dim=1)
+
 
         p = ops.non_max_suppression(
             preds[0],
@@ -125,10 +112,6 @@ class ObbSegValidator(DetectionValidator):
 
     def _prepare_batch(self, si, batch):
         """Prepares a batch for training or inference by processing images and targets."""
-        # # todo: 强行将batch改为正向seg版本的
-        # batch["bboxes_angle"] = batch["bboxes"][:, 4]
-        # batch["bboxes"] = batch["bboxes"][:, :4]
-
         idx = batch["batch_idx"] == si
         cls = batch["cls"][idx].squeeze(-1)
         bbox = batch["bboxes"][idx]
@@ -146,11 +129,17 @@ class ObbSegValidator(DetectionValidator):
 
     def _prepare_pred(self, pred, pbatch, proto):
         """Prepares a batch for training or inference by processing images and targets."""
-        predn = super()._prepare_pred(pred, pbatch)
+        predn = pred.clone()
+        ops.scale_boxes(
+            pbatch["imgsz"], predn[:, :4], pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"], xywh=True
+        )  # native-space pred
+
+        # predn = super()._prepare_pred(pred, pbatch)
+
         # predn = predn[:, :-1]
         # pred_masks = self.process(proto, pred[:, 6:], pred[:, :4], shape=pbatch["imgsz"])
-        # 强行不要最后一个角度
-        pred_masks = self.process(proto, pred[:, 6:-1], pred[:, :4], shape=pbatch["imgsz"])
+        # 处理过旋转
+        pred_masks = self.process(proto, pred[:, 6:-1], torch.cat([pred[:, :4], pred[:, -1:]], dim=1), shape=pbatch["imgsz"])
         return predn, pred_masks
 
     def update_metrics(self, preds, batch):
@@ -188,6 +177,13 @@ class ObbSegValidator(DetectionValidator):
 
             # Evaluate
             if nl:
+                # debug plt here
+                # predn_obb = torch.cat([predn[:, :6], predn[:, -1:]], dim=1) # shape [n,6+1]
+                # stat["tp"] = self._process_batch(predn_obb, bbox, cls)
+                # stat["tp_m"] = self._process_batch(
+                #     predn[:, :-1], bbox, cls, pred_masks, gt_masks, self.args.overlap_mask, masks=True
+                # )
+
                 stat["tp"] = self._process_batch(predn, bbox, cls)
                 stat["tp_m"] = self._process_batch(
                     predn, bbox, cls, pred_masks, gt_masks, self.args.overlap_mask, masks=True
@@ -267,6 +263,18 @@ class ObbSegValidator(DetectionValidator):
             if gt_masks.shape[1:] != pred_masks.shape[1:]:
                 gt_masks = F.interpolate(gt_masks[None], pred_masks.shape[1:], mode="bilinear", align_corners=False)[0]
                 gt_masks = gt_masks.gt_(0.5)
+            # # # todo debug
+            # # debug plt 1
+            # import numpy as np
+            # import matplotlib.pyplot as plt
+            # gt_masks0 = np.array(gt_masks[0].clone().cpu())
+            # pred_masks0 = np.array(pred_masks[0].clone().cpu())
+            # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+            # ax1.imshow(gt_masks0, cmap='viridis', interpolation='nearest')
+            # ax2.imshow(pred_masks0, cmap='viridis', interpolation='nearest')
+            # plt.show()
+            #
+            # # debug plt end
             iou = mask_iou(gt_masks.view(gt_masks.shape[0], -1), pred_masks.view(pred_masks.shape[0], -1))
         else:  # boxes
             # iou = box_iou(gt_bboxes, detections[:, :4])

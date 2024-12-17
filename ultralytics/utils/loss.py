@@ -527,10 +527,6 @@ class v8ObbSegLoss(v8DetectionLoss):
         # Targets
         try:
             batch_idx = batch["batch_idx"].view(-1, 1)
-            # # todo : 强行将batch改为正向seg版本的
-            # batch["bboxes_angle"] = batch["bboxes"][:, 4]
-            # batch["bboxes"] = batch["bboxes"][:, :4]
-
 
             targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"].view(-1, 5)), 1)
             rw, rh = targets[:, 4] * imgsz[0].item(), targets[:, 5] * imgsz[1].item()
@@ -579,7 +575,6 @@ class v8ObbSegLoss(v8DetectionLoss):
         target_scores_sum = max(target_scores.sum(), 1)
 
         # Cls loss
-        # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         loss[2] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
 
 
@@ -611,9 +606,11 @@ class v8ObbSegLoss(v8DetectionLoss):
             if tuple(masks.shape[-2:]) != (mask_h, mask_w):  # downsample
                 masks = F.interpolate(masks[None], (mask_h, mask_w), mode="nearest")[0]
 
-            loss[1] = self.calculate_segmentation_loss_obb_seg(
-                fg_mask, masks, target_gt_idx, target_bboxes, batch_idx, proto, pred_masks, imgsz, self.overlap
-            )
+            loss[1] = 0.0
+            # loss[1] = self.calculate_segmentation_loss_obb_seg(
+            #     fg_mask, masks, target_gt_idx, target_bboxes, batch_idx, proto, pred_masks, imgsz, self.overlap
+            # )
+
 
         # WARNING: lines below prevent Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove
         else:
@@ -663,7 +660,7 @@ class v8ObbSegLoss(v8DetectionLoss):
 
     @staticmethod
     def single_mask_loss_obb_seg(
-        gt_mask: torch.Tensor, pred: torch.Tensor, proto: torch.Tensor, xyxy: torch.Tensor, area: torch.Tensor
+        gt_mask: torch.Tensor, pred: torch.Tensor, proto: torch.Tensor, xyxyr: torch.Tensor, area: torch.Tensor
     ) -> torch.Tensor:
         """
         Compute the instance segmentation loss for a single image.
@@ -672,7 +669,7 @@ class v8ObbSegLoss(v8DetectionLoss):
             gt_mask (torch.Tensor): Ground truth mask of shape (n, H, W), where n is the number of objects.
             pred (torch.Tensor): Predicted mask coefficients of shape (n, 32).
             proto (torch.Tensor): Prototype masks of shape (32, H, W).
-            xyxy (torch.Tensor): Ground truth bounding boxes in xyxy format, normalized to [0, 1], of shape (n, 4).
+            xyxyr (torch.Tensor): Ground truth bounding boxes in xyxyr format, normalized to [0, 1], of shape (n, 5).
             area (torch.Tensor): Area of each ground truth bounding box of shape (n,).
 
         Returns:
@@ -683,9 +680,23 @@ class v8ObbSegLoss(v8DetectionLoss):
             predicted masks from the prototype masks and predicted mask coefficients.
         """
         pred_mask = torch.einsum("in,nhw->ihw", pred, proto)  # (n, 32) @ (32, 80, 80) -> (n, 80, 80)
+
+
         loss = F.binary_cross_entropy_with_logits(pred_mask, gt_mask, reduction="none")
-        # return (crop_mask(loss, xyxy[..., :-1]).mean(dim=(1, 2)) / area).sum()
-        return (crop_mask_obb_seg(loss, xyxy).mean(dim=(1, 2)) / area).sum()
+        # return loss.sum()/pred_mask.shape[0]/2000.0*4.0
+        # # # # todo debug
+        # # debug plt 3
+        # import numpy as np
+        # import matplotlib.pyplot as plt
+        # gt_masks0 = gt_mask[0].clone().cpu().detach().numpy()
+        # pred_masks0 =pred_mask[0].clone().cpu().detach().numpy()
+        # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+        # ax1.imshow(gt_masks0, cmap='viridis', interpolation='nearest')
+        # ax2.imshow(pred_masks0, cmap='viridis', interpolation='nearest')
+        # plt.show()
+        # #
+        # # # debug plt end
+        return (crop_mask_obb_seg(loss, xyxyr).mean(dim=(1, 2)) / area).sum()
 
     def calculate_segmentation_loss(
         self,
@@ -789,19 +800,22 @@ class v8ObbSegLoss(v8DetectionLoss):
         """
         _, _, mask_h, mask_w = proto.shape
         loss = 0
+        rot_angle = target_bboxes[..., 4:]
+        # nms没有转换 这个先换一下方便归一化，然后在计算面积
+        target_bboxes = xywh2xyxy(target_bboxes[..., :4])
 
         # Normalize to 0-1
-        target_bboxes_normalized = target_bboxes / imgsz[[1, 0, 1, 0, 1]]
+        target_bboxes_normalized = target_bboxes / imgsz[[1, 0, 1, 0]]
 
         # Areas of target bboxes # 面积与旋转无关
-        # marea = xyxy2xywh(target_bboxes_normalized[..., :-1])[..., 2:].prod(2)
-        marea = xyxy2xywh(target_bboxes_normalized[..., :-1])[..., 2:4].prod(2)
+        marea = xyxy2xywh(target_bboxes_normalized)[..., 2:].prod(2)
 
-        # Normalize to mask size
-        mxyxy = target_bboxes_normalized * torch.tensor([mask_w, mask_h, mask_w, mask_h,1], device=proto.device)
+        # Normalize to mask size # 把xywh变成0-mask_w/mask_h大小的
+        mxyxy = target_bboxes_normalized * torch.tensor([mask_w, mask_h, mask_w, mask_h], device=proto.device)
+        mxyxyr = torch.cat([mxyxy, rot_angle], dim=-1)
 
-        for i, single_i in enumerate(zip(fg_mask, target_gt_idx, pred_masks, proto, mxyxy, marea, masks)):
-            fg_mask_i, target_gt_idx_i, pred_masks_i, proto_i, mxyxy_i, marea_i, masks_i = single_i
+        for i, single_i in enumerate(zip(fg_mask, target_gt_idx, pred_masks, proto, mxyxyr, marea, masks)):
+            fg_mask_i, target_gt_idx_i, pred_masks_i, proto_i, mxyxyr_i, marea_i, masks_i = single_i
             if fg_mask_i.any():
                 mask_idx = target_gt_idx_i[fg_mask_i]
                 if overlap:
@@ -811,7 +825,7 @@ class v8ObbSegLoss(v8DetectionLoss):
                     gt_mask = masks[batch_idx.view(-1) == i][mask_idx]
 
                 loss += self.single_mask_loss_obb_seg(
-                    gt_mask, pred_masks_i[fg_mask_i], proto_i, mxyxy_i[fg_mask_i], marea_i[fg_mask_i]
+                    gt_mask, pred_masks_i[fg_mask_i], proto_i, mxyxyr_i[fg_mask_i], marea_i[fg_mask_i]
                 )
 
             # WARNING: lines below prevents Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove

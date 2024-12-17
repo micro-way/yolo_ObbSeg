@@ -107,22 +107,24 @@ class YOLODataset(BaseDataset):
                 ne += ne_f
                 nc += nc_f
                 if im_file:
-                    if self.use_obb_seg==True:
-                        x["labels"].append(
-                            {
-                                "im_file": im_file,
-                                "shape": shape,
-                                "cls": lb[:, 0:1],  # n, 1
-                                "bboxes":segments2boxes([segment[4:] for segment in segments]) ,  # n, 4
-                                "obb_dota":[segment[:4] for segment in segments], # 旋转的4个x和y 遵照dota格式
-                                "segments": [segment[4:] for segment in segments], # 其他的点组成的mask
-                                "keypoints": keypoint,
-                                "normalized": True,
-                                "bbox_format": "xywh",
-                            }
-                        )
-
-                    else:
+                    # if self.use_obb_seg==True:
+                    #     x["labels"].append(
+                    #         {
+                    #             "im_file": im_file,
+                    #             "shape": shape,
+                    #             "cls": lb[:, 0:1],  # n, 1
+                    #             "bboxes":segments2boxes([segment[4:] for segment in segments]) ,  # n, 4
+                    #             "obb_dota":[segment[:4] for segment in segments], # 旋转的4个x和y 遵照dota格式
+                    #             "segments": [segment[4:] for segment in segments], # 其他的点组成的mask
+                    #             "keypoints": keypoint,
+                    #             "normalized": True,
+                    #             "bbox_format": "xywh",
+                    #         }
+                    #     )
+                    #
+                    # else:
+                    ## debug plt
+                    if True:
                         x["labels"].append(
                             {
                                 "im_file": im_file,
@@ -230,8 +232,9 @@ class YOLODataset(BaseDataset):
             Can also support classification and semantic segmentation by adding or removing dict keys there.
         """
         bboxes = label.pop("bboxes")
-        if self.use_obb_seg:
-            obb_dota = label.pop("obb_dota")
+        # debug plt
+        # if self.use_obb_seg:
+        #     obb_dota = label.pop("obb_dota")
         # 数据合并不到label["instances"] = Instances() # 旋转框可以现场建立#用那个生成的代码
         segments = label.pop("segments", [])
         keypoints = label.pop("keypoints", None)
