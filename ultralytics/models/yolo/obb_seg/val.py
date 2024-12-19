@@ -315,8 +315,8 @@ class ObbSegValidator(DetectionValidator):
         #     names=self.names,
         #     on_plot=self.on_plot,
         # )  # pred
-        output = output_to_target([p[:,:-1]for p in preds[0]], max_det=15)
-        output_rotate = output_to_rotated_target([torch.cat([p[:, :6], (p[:, -1]).unsqueeze(1)], dim=1)for p in preds[0]], max_det=15)
+        output = output_to_target([p[:,:-1]for p in preds[0]], max_det=self.args.max_det)
+        output_rotate = output_to_rotated_target([torch.cat([p[:, :6], (p[:, -1]).unsqueeze(1)], dim=1)for p in preds[0]], max_det=self.args.max_det)
         # 替换4+1带旋转的解码输出
         outputs = (output[0], output[1], output_rotate[2], output[3])
         plot_images(
