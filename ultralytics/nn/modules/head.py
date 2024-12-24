@@ -248,6 +248,10 @@ class ObbSegHead(Detect):
             nn.Sequential(Conv(x, c5, 3), Conv(c5, c5, 3), nn.Conv2d(c5, self.ne, 1))
             for x in ch  # 对每个检测层都定义一个这样的卷积序列
         ])
+    def decode_bboxes(self, bboxes, anchors):
+        """Decode rotated bounding boxes."""
+        return dist2rbox(bboxes, self.angle, anchors, dim=1)
+
 
     def forward(self, x):
         if 1:

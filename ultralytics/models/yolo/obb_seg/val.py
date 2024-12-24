@@ -196,7 +196,7 @@ class ObbSegValidator(DetectionValidator):
 
             pred_masks = torch.as_tensor(pred_masks, dtype=torch.uint8)
             if self.args.plots and self.batch_i < 3:
-                self.plot_masks.append(pred_masks[:15].cpu())  # filter top 15 to plot
+                self.plot_masks.append(pred_masks[:300].cpu())  # filter top 15 to plot
 
             # Save
             if self.args.save_json:
