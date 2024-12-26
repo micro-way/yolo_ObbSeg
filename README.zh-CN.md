@@ -1,4 +1,6 @@
-本项目基于Ultralytics。你可以使用model = YOLO('yolov8-obb_seg.yaml', task="obb_seg")来同时完成OBB和seg任务，具体可见yoloobb-data下的train。
+本项目基于Ultralytics。你可以使用
+model = YOLO('yolov8-obb_seg.yaml', task="obb_seg")
+来同时完成OBB和seg任务，具体可见yoloobb-data目录下的train。
 小麦FHB实例分割数据集合的获取和其他问题可咨询我的邮箱:zjzcw1224@qq.com
 预测图如下:
 ![image](result_pic.png)

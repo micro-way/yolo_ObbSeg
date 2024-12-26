@@ -1,4 +1,6 @@
-本项目基于Ultralytics。你可以使用model = YOLO('yolov8-obb_seg.yaml', task="obb_seg")来同时完成OBB和seg任务，具体可见yoloobb-data下的train。
+This project is based on Ultralytics. You can use:
+model = YOLO('yolov8-obb_seg.yaml', task="obb_seg")
+to complete the OBB and seg tasks at the same time, see the train under dir yoloobb-data.
 The forecast graph is as follows:
 ![image](result_pic.png)
 The rotation-based approach works better, and the specific indicators are as follows:
