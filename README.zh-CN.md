@@ -1,9 +1,11 @@
 本项目基于Ultralytics。你可以使用model = YOLO('yolov8-obb_seg.yaml', task="obb_seg")来同时完成OBB和seg任务，具体可见yoloobb-data下的train。
 小麦FHB实例分割数据集合的获取和其他问题可咨询我的邮箱:zjzcw1224@qq.com
 预测图如下:
-![image]result_pic.png
+![image](result_pic.png)
 基于旋转的方法效果更好，具体指标如下:
-![image]result_table.png
+使用 yolov8n-seg 和 my yolov8n-obb_seg 
+在一个自有的3474张的麦穗实例分割数据集上，train:val:test=6:2:2
+![image](result_table.png)
 <div align="center">
   <p>
     <a href="https://www.ultralytics.com/events/yolovision" target="_blank">

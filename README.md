@@ -1,8 +1,10 @@
 本项目基于Ultralytics。你可以使用model = YOLO('yolov8-obb_seg.yaml', task="obb_seg")来同时完成OBB和seg任务，具体可见yoloobb-data下的train。
 The forecast graph is as follows:
-![image]result_pic.png
+![image](result_pic.png)
 The rotation-based approach works better, and the specific indicators are as follows:
-![image]result_table.png
+used yolov8n-seg and my yolov8n-obb_seg
+On a self-owned dataset of 3474 wheat ear instances, train:val:test=6:2:2
+![image](result_table.png)
 <div align="center">
   <p>
     <a href="https://www.ultralytics.com/events/yolovision" target="_blank">
