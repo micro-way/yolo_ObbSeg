@@ -1,6 +1,6 @@
 path: D:/0master/yolo_obb_seg/ultralytics-8.3.39zcw/yoloobb-data/data_obb_seg
-train: trainseg
-val: valseg
+train: trainseg2
+val: valseg2
 
 nc: 2
 
