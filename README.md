@@ -4,6 +4,8 @@ The forecast graph is as follows:
 The rotation-based approach works better, and the specific indicators are as follows:
 used yolov8n-seg and my yolov8n-obb_seg
 On a self-owned dataset of 3474 wheat ear instances, train:val:test=6:2:2
+Please update the pip to the latest and install it with the following command:
+pip install -e .
 ![image](result_table.png)
 <div align="center">
   <p>
