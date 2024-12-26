@@ -1,3 +1,8 @@
+本项目基于Ultralytics。你可以使用model = YOLO('yolov8-obb_seg.yaml', task="obb_seg")来同时完成OBB和seg任务，具体可见yoloobb-data下的train。
+The forecast graph is as follows:
+![image]result_pic.png
+The rotation-based approach works better, and the specific indicators are as follows:
+![image]result_table.png
 <div align="center">
   <p>
     <a href="https://www.ultralytics.com/events/yolovision" target="_blank">

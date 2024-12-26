@@ -1,0 +1,11 @@
+path: D:/0master/yolo_obb_seg/ultralytics-8.3.39zcw/yoloobb-data/InstSeg3474yolo622obb_seg
+train: train_obb
+val: val_obb
+
+nc: 2
+
+names:
+  0: bg
+  1: wheat
+  #yolo obb train data=my-dota8-obb.yaml model=yolov8s-obb.pt epochs=200 imgsz=640 device=0
+
